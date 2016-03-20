@@ -22,6 +22,12 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+#define DOS FIXPOINT(2, 1) /* El 2 en punto fijo */
+#define CUATRO FIXPOINT(4, 1) /* El 4 en punto fijo */
+#define UNO FIXPOINT(1, 1) /* El 1 en punto fijo */
+#define FRAC1 FIXPOINT(59, 60) /* 59/60 en punto fijo */
+#define FRAC2 FIXPOINT(1, 60) /* 1/60 en punto fijo */
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
