@@ -1,4 +1,5 @@
 #include "threads/thread.h"
+#include "devices/timer.h"
 #include <debug.h>
 #include <stddef.h>
 #include <random.h>
@@ -27,10 +28,13 @@
 #define UNO FIXPOINT(1, 1) /* El 1 en punto fijo */
 #define FRAC1 FIXPOINT(59, 60) /* 59/60 en punto fijo */
 #define FRAC2 FIXPOINT(1, 60) /* 1/60 en punto fijo */
+#define MAXIMA_PRIORIDAD FIXPOINT(PRI_MAX, 1) /* La máxima prioridad, en su versión de punto fijo */
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+
+static int ready_threads = 0; /* Número de threads listos para ejecutarse. */
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -60,7 +64,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
-static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+static unsigned thread_ticks;   /* # of timer ticks since last yield. */ 
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -78,6 +82,8 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+void recalcula_prioridad (struct thread *t, void* aux UNUSED);
+void recalcula_recent_cpu (struct thread *t, void* aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -131,8 +137,17 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-
   /* Update statistics. */
+  if(timer_ticks() % 4 == 0){
+    /* Se recalcula la prioridad. */
+    thread_foreach (recalcula_prioridad, NULL);
+  }
+  if(timer_ticks() % TIMER_FREQ == 0){
+  
+    /* Se recalcula el recent_cpu. */
+    t->recent_cpu += 1; /* Siempre se incrementa en 1 el recent_cpu del thread que se ejecuta al momento del tick. */
+    thread_foreach (recalcula_recent_cpu, NULL);
+  }
   if (t == idle_thread)
     idle_ticks++;
 #ifdef USERPROG
@@ -145,6 +160,21 @@ thread_tick (void)
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
+}
+
+/* Recalcula la prioridad de un thread y además lo reinserta en la
+   ready_list con su nueva prioridad. */
+void
+recalcula_prioridad (struct thread *t, void* aux UNUSED){
+  t->priority = FIXPOINT_TO_INT(MAXIMA_PRIORIDAD - ((t->recent_cpu)/CUATRO) - (t->nice * DOS));
+  list_remove(&t->elem);
+  list_insert_ordered(&ready_list, &t->elem, thread_less, NULL);
+}
+
+/* Recalcula el recent_cpu de un thread. */
+void
+recalcula_recent_cpu (struct thread *t, void* aux UNUSED){
+  t->priority = FIXPOINT_TO_INT((DOS*t->load_avg) / (DOS * (t->load_avg + UNO)) * t->recent_cpu + t->nice);
 }
 
 /* Prints thread statistics. */
@@ -269,6 +299,7 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   /********** renatiux **********/
   list_insert_ordered(&ready_list, &t->elem, thread_less, NULL);
+  ready_threads++;
   /********** renatiux **********/
   
   t->status = THREAD_READY;
@@ -402,7 +433,7 @@ thread_get_nice (void)
 
 /* Returns 100 times the system load average. */
 int
-thread_get_load_avg (void) 
+thread_get_load_avg(void) 
 {
   /* Not yet implemented. */
   return 0;
@@ -500,6 +531,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->recent_cpu = 0;
+  t->nice = 0;
+  t->load_avg = 0;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
