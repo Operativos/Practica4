@@ -26,6 +26,7 @@
 #define DOS FIXPOINT(2, 1) /* El 2 en punto fijo */
 #define CUATRO FIXPOINT(4, 1) /* El 4 en punto fijo */
 #define UNO FIXPOINT(1, 1) /* El 1 en punto fijo */
+#define CERO FIXPOINT(0, 1) /* El 0 en punto fijo */
 #define FRAC1 FIXPOINT(59, 60) /* 59/60 en punto fijo */
 #define FRAC2 FIXPOINT(1, 60) /* 1/60 en punto fijo */
 #define MAXIMA_PRIORIDAD FIXPOINT(PRI_MAX, 1) /* La máxima prioridad, en su versión de punto fijo */
@@ -34,7 +35,7 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
-static int ready_threads = 0; /* Número de threads listos para ejecutarse. */
+static int ready_threads = CERO; /* Número de threads listos para ejecutarse más el thread en ejecución. */
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -84,6 +85,7 @@ void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 void recalcula_prioridad (struct thread *t, void* aux UNUSED);
 void recalcula_recent_cpu (struct thread *t, void* aux UNUSED);
+void recalcula_load_avg (struct thread *t, void* aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -106,7 +108,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-
+  ready_threads += UNO;
+  
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -138,15 +141,15 @@ thread_tick (void)
 {
   struct thread *t = thread_current ();
   /* Update statistics. */
+  t->recent_cpu += 1; /* Siempre se incrementa en 1 el recent_cpu del thread que se ejecuta al momento del tick. */
   if(timer_ticks() % 4 == 0){
     /* Se recalcula la prioridad. */
     thread_foreach (recalcula_prioridad, NULL);
   }
   if(timer_ticks() % TIMER_FREQ == 0){
-  
     /* Se recalcula el recent_cpu. */
-    t->recent_cpu += 1; /* Siempre se incrementa en 1 el recent_cpu del thread que se ejecuta al momento del tick. */
     thread_foreach (recalcula_recent_cpu, NULL);
+    thread_foreach (recalcula_load_avg, NULL);
   }
   if (t == idle_thread)
     idle_ticks++;
@@ -174,7 +177,13 @@ recalcula_prioridad (struct thread *t, void* aux UNUSED){
 /* Recalcula el recent_cpu de un thread. */
 void
 recalcula_recent_cpu (struct thread *t, void* aux UNUSED){
-  t->priority = FIXPOINT_TO_INT((DOS*t->load_avg) / (DOS * (t->load_avg + UNO)) * t->recent_cpu + t->nice);
+  t->recent_cpu = (DOS * t->load_avg) / (DOS * (t->load_avg + UNO)) * t->recent_cpu + t->nice;
+}
+
+/* Recalcula el load_avg de un thread. */
+void
+recalcula_load_avg (struct thread *t, void* aux UNUSED){
+  t->load_avg = FRAC1 * t->load_avg + FRAC2 * ready_threads;
 }
 
 /* Prints thread statistics. */
@@ -299,7 +308,7 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   /********** renatiux **********/
   list_insert_ordered(&ready_list, &t->elem, thread_less, NULL);
-  ready_threads++;
+  ready_threads += UNO;
   /********** renatiux **********/
   
   t->status = THREAD_READY;
@@ -371,11 +380,12 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
+  if (cur != idle_thread) {
     /********** renatiux **********/
     list_insert_ordered(&ready_list, &cur->elem, thread_less, NULL);
+    ready_threads += UNO;
     /********** renatiux **********/
-    
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -531,9 +541,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  t->recent_cpu = 0;
-  t->nice = 0;
-  t->load_avg = 0;
+  t->recent_cpu = CERO;
+  t->nice = CERO;
+  t->load_avg = CERO;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -561,8 +571,10 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else
+  else{
+    ready_threads -= UNO;
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
