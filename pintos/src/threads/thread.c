@@ -27,6 +27,7 @@
 #define CUATRO FIXPOINT(4, 1) /* El 4 en punto fijo */
 #define UNO FIXPOINT(1, 1) /* El 1 en punto fijo */
 #define CERO FIXPOINT(0, 1) /* El 0 en punto fijo */
+#define CIEN FIXPOINT(100, 1) /* El 100 en punto fijo */
 #define FRAC1 FIXPOINT(59, 60) /* 59/60 en punto fijo */
 #define FRAC2 FIXPOINT(1, 60) /* 1/60 en punto fijo */
 #define MAXIMA_PRIORIDAD FIXPOINT(PRI_MAX, 1) /* La máxima prioridad, en su versión de punto fijo */
@@ -428,33 +429,30 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
-  /* Not yet implemented. */
+  thread_current()->nice = FIXPOINT(nice, 1);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FIXPOINT_TO_INT(thread_current ()->nice);
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg(void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FIXPOINT_TO_INT(CIEN * thread_current ()->load_avg);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FIXPOINT_TO_INT(CIEN * thread_current ()->recent_cpu);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
