@@ -141,6 +141,7 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
+  t->recent_cpu += UNO; /* Siempre se incrementa en 1 el recent_cpu del thread que se ejecuta al momento del tick. */
   if(timer_ticks() % TIMER_FREQ == 0){
     /* Se recalcula ready_threads */
     ready_threads = FIXPOINT(list_size(&ready_list), 1);
@@ -152,7 +153,6 @@ thread_tick (void)
     thread_foreach (recalcula_recent_cpu, NULL);
   }
   /* Update statistics. */
-  t->recent_cpu += 1; /* Siempre se incrementa en 1 el recent_cpu del thread que se ejecuta al momento del tick. */
   if(timer_ticks() % 4 == 0){
     /* Se recalcula la prioridad. */
     thread_foreach (recalcula_prioridad, NULL);
@@ -181,7 +181,11 @@ recalcula_prioridad (struct thread *t, void* aux UNUSED){
 /* Recalcula el recent_cpu de un thread. */
 void
 recalcula_recent_cpu (struct thread *t, void* aux UNUSED){
-  t->recent_cpu = FIXPOINT_PRODUCT(FIXPOINT_DIVISION(FIXPOINT_PRODUCT(DOS, load_avg) , FIXPOINT_PRODUCT(DOS, (load_avg + UNO))), t->recent_cpu) + t->nice;
+  int parte1, parte2, parte3; /* Las partes del la fórmula (las calculo a parte para evitar confusión) */
+  parte1 = FIXPOINT_PRODUCT(DOS, load_avg);
+  parte2 = parte1 + UNO;
+  parte3 = FIXPOINT_DIVISION(parte1, parte2);
+  t->recent_cpu = FIXPOINT_PRODUCT(parte3, t->recent_cpu) + t->nice;
 }
 
 /* Prints thread statistics. */
