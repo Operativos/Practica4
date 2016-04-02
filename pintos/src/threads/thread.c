@@ -36,7 +36,7 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
-static int ready_threads = CERO; /* Número de threads listos para ejecutarse más el thread en ejecución. */
+static int ready_threads; /* Número de threads listos para ejecutarse más el thread en ejecución. */
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -73,6 +73,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
+static int load_avg = CERO; /* La carga promedio del CPU */
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -86,7 +88,6 @@ void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 void recalcula_prioridad (struct thread *t, void* aux UNUSED);
 void recalcula_recent_cpu (struct thread *t, void* aux UNUSED);
-void recalcula_load_avg (struct thread *t, void* aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -109,7 +110,6 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-  ready_threads += UNO;
   
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -141,16 +141,22 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
+  if(timer_ticks() % TIMER_FREQ == 0){
+    /* Se recalcula ready_threads */
+    ready_threads = FIXPOINT(list_size(&ready_list), 1);
+    if(t != idle_thread)
+      ready_threads += UNO;
+    /* Se recalcula el load_avg */
+    load_avg = FIXPOINT_PRODUCT(FRAC1, load_avg) + FIXPOINT_PRODUCT(FRAC2, ready_threads);
+    /* Se recalcula el recent_cpu. */
+    thread_foreach (recalcula_recent_cpu, NULL);
+  }
   /* Update statistics. */
   t->recent_cpu += 1; /* Siempre se incrementa en 1 el recent_cpu del thread que se ejecuta al momento del tick. */
   if(timer_ticks() % 4 == 0){
     /* Se recalcula la prioridad. */
     thread_foreach (recalcula_prioridad, NULL);
-  }
-  if(timer_ticks() % TIMER_FREQ == 0){
-    /* Se recalcula el recent_cpu. */
-    thread_foreach (recalcula_recent_cpu, NULL);
-    thread_foreach (recalcula_load_avg, NULL);
+    list_sort(&ready_list, thread_less, NULL);
   }
   if (t == idle_thread)
     idle_ticks++;
@@ -166,25 +172,16 @@ thread_tick (void)
     intr_yield_on_return ();
 }
 
-/* Recalcula la prioridad de un thread y además lo reinserta en la
-   ready_list con su nueva prioridad. */
+/* Recalcula la prioridad de un thread. */
 void
 recalcula_prioridad (struct thread *t, void* aux UNUSED){
-  t->priority = FIXPOINT_TO_INT(MAXIMA_PRIORIDAD - ((t->recent_cpu)/CUATRO) - (t->nice * DOS));
-  list_remove(&t->elem);
-  list_insert_ordered(&ready_list, &t->elem, thread_less, NULL);
+  t->priority = FIXPOINT_TO_INT(MAXIMA_PRIORIDAD - FIXPOINT_DIVISION((t->recent_cpu), CUATRO) - FIXPOINT_PRODUCT(t->nice, DOS));
 }
 
 /* Recalcula el recent_cpu de un thread. */
 void
 recalcula_recent_cpu (struct thread *t, void* aux UNUSED){
-  t->recent_cpu = (DOS * t->load_avg) / (DOS * (t->load_avg + UNO)) * t->recent_cpu + t->nice;
-}
-
-/* Recalcula el load_avg de un thread. */
-void
-recalcula_load_avg (struct thread *t, void* aux UNUSED){
-  t->load_avg = FRAC1 * t->load_avg + FRAC2 * ready_threads;
+  t->recent_cpu = FIXPOINT_PRODUCT(FIXPOINT_DIVISION(FIXPOINT_PRODUCT(DOS, load_avg) , FIXPOINT_PRODUCT(DOS, (load_avg + UNO))), t->recent_cpu) + t->nice;
 }
 
 /* Prints thread statistics. */
@@ -309,7 +306,6 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   /********** renatiux **********/
   list_insert_ordered(&ready_list, &t->elem, thread_less, NULL);
-  ready_threads += UNO;
   /********** renatiux **********/
   
   t->status = THREAD_READY;
@@ -384,7 +380,6 @@ thread_yield (void)
   if (cur != idle_thread) {
     /********** renatiux **********/
     list_insert_ordered(&ready_list, &cur->elem, thread_less, NULL);
-    ready_threads += UNO;
     /********** renatiux **********/
   }
   cur->status = THREAD_READY;
@@ -445,14 +440,14 @@ thread_get_nice (void)
 int
 thread_get_load_avg(void) 
 {
-  return FIXPOINT_TO_INT(CIEN * thread_current ()->load_avg);
+  return FIXPOINT_TO_INT(FIXPOINT_PRODUCT(CIEN, load_avg));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  return FIXPOINT_TO_INT(CIEN * thread_current ()->recent_cpu);
+  return FIXPOINT_TO_INT(FIXPOINT_PRODUCT(CIEN, thread_current ()->recent_cpu));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -541,7 +536,6 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->recent_cpu = CERO;
   t->nice = CERO;
-  t->load_avg = CERO;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -567,10 +561,10 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list))
+  if (list_empty (&ready_list)){
     return idle_thread;
+  }
   else{
-    ready_threads -= UNO;
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
   }
 }

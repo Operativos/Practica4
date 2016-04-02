@@ -90,7 +90,6 @@ struct thread
     int priority;                       /* Priority. */
     int recent_cpu;                     /* El recent_cpu del thread. */
     int nice;                           /* La propiedad nice del thread (se utiliza para calcular prioridad. */
-    int load_avg;                       /* La carga promedio del thread */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
